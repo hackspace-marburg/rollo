@@ -5,6 +5,10 @@
 #include <ESP8266WebServer.h>
 #include <AccelStepper.h>
 
+#define CURTAIN_UP     0
+#define CURTAIN_DOWN   1
+#define CURTAIN_STATUS 2
+
 const char* wlan_ssid = "hsmr";
 const char* wlan_psk = "xxx";
 const char* host_name = "rollo";
@@ -23,14 +27,58 @@ ESP8266WebServer server(80);
 
 AccelStepper stepper(AccelStepper::DRIVER, stepper_pin_step, stepper_pin_dir);
 
-String toggle() {
-  if (stepper.currentPosition() == travelling_distance) {
-    stepper.moveTo(0);
-    return "moving to 0... (up)";
+/* JSON-Response:
+ *  { "auth": AUTH, "pos": POS, "position": POSITION, \"oldpos\": OLDPOS, "state": STATE }
+ *  AUTH (String): Authentification succeed {okay, failed}
+ *  POS (Int): Position [0, travelling_distance]
+ *  POSITION (String): State of the curtain {up, down}
+ *  OLDPOS (Int): Old position [travelling_distance, 0]
+ *  STATE (String): Was the curtain moved {changed, unchanged}
+ */
+
+String curtainChange(int target) {
+  long currPos = stepper.currentPosition();
+  long trgtPos;
+  String pos;
+  String state;
+
+  switch(target) {
+    case CURTAIN_UP:
+      trgtPos = 0;
+      pos = "up";
+      break;
+
+    case CURTAIN_DOWN:
+      trgtPos = travelling_distance;
+      pos = "down";
+      break;
+
+    case CURTAIN_STATUS:
+    default:
+      trgtPos = currPos;
+      pos = String((currPos == 0) ? "up" : "down");
   }
-  else if (stepper.currentPosition() == 0) {
-    stepper.moveTo(travelling_distance);
-    return "moving to " + String(travelling_distance) + "... (down)";
+  state = String((currPos == trgtPos) ? "unchanged" : "changed");
+
+  if(target != CURTAIN_STATUS && currPos != trgtPos)
+    stepper.moveTo(trgtPos);
+
+  return "{ \"auth\": \"okay\", \"pos\": " + String(trgtPos) + ", \"position\": \"" + 
+    pos + "\", \"oldpos\": " + String(currPos) + ", \"state\": \"" + state + "\" }";
+}
+
+String curtainUp() { return curtainChange(CURTAIN_UP); }
+String curtainDown() { return curtainChange(CURTAIN_DOWN); }
+String curtainToggle() {
+  return curtainChange((stepper.currentPosition() == 0) ? CURTAIN_DOWN : CURTAIN_UP);
+}
+String curtainStatus() { return curtainChange(CURTAIN_STATUS); }
+
+void serverResponse(String (*response)(void)) {
+  if(server.arg("password") == password) {
+    server.send(200, "text/plain", response());
+  } else {
+    server.send(401, "text/plain", "{ \"auth\": \"failed\" }");
   }
 }
 
@@ -76,13 +124,10 @@ void setup() {
 
   pinMode(toggle_button_pin, INPUT);
 
-  server.on("/toggle", [](){
-    if (server.arg("password") == password) {
-        server.send(200, "text/plain", toggle());
-    } else {
-      server.send(401, "text/plain", "u shall not pass!");
-    }
-  });
+  server.on("/up", []()     { serverResponse(curtainUp); });
+  server.on("/down", []()   { serverResponse(curtainDown); });
+  server.on("/toggle", []() { serverResponse(curtainToggle); });
+  server.on("/status", []() { serverResponse(curtainStatus); });
 
   server.begin();
   
@@ -98,7 +143,7 @@ void loop() {
     digitalWrite(stepper_pin_enable, HIGH);
     server.handleClient();  // avoid timing problems
     if (digitalRead(toggle_button_pin) == HIGH) {
-      toggle();
+      curtainToggle();
     }
   } else {
     digitalWrite(stepper_pin_enable, LOW);
