@@ -5,10 +5,6 @@
 #include <ESP8266WebServer.h>
 #include <AccelStepper.h>
 
-#define CURTAIN_UP     0
-#define CURTAIN_DOWN   1
-#define CURTAIN_STATUS 2
-
 const char* wlan_ssid = "hsmr";
 const char* wlan_psk = "xxx";
 const char* host_name = "rollo";
@@ -35,8 +31,9 @@ AccelStepper stepper(AccelStepper::DRIVER, stepper_pin_step, stepper_pin_dir);
  *  OLDPOS (Int): Old position [travelling_distance, 0]
  *  STATE (String): Was the curtain moved {changed, unchanged}
  */
+typedef enum { CURTAIN_UP, CURTAIN_DOWN, CURTAIN_STATUS } CurtainStatus;
 
-String curtainChange(int target) {
+String curtainChange(CurtainStatus target) {
   long currPos = stepper.currentPosition();
   long trgtPos;
   String pos;
@@ -120,7 +117,7 @@ void setup() {
 
   stepper.setMaxSpeed(340.0);
   stepper.setAcceleration(500.0);
-  stepper.moveTo(travelling_distance);  // FIXME: you spin my roll right round, right round, when you go down, when you go down, down... use endstop
+  curtainDown();
 
   pinMode(toggle_button_pin, INPUT);
 
